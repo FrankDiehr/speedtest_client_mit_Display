@@ -15,6 +15,7 @@ Wants=network-online.target
 Type=simple
 User=root
 WorkingDirectory=/opt/speedmon
+ExecStartPre=/bin/bash /opt/speedmon/bin/update-display-state.sh init
 ExecStart=/usr/bin/python3 /opt/speedmon/bin/display-daemon.py
 Restart=always
 RestartSec=2
