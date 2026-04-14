@@ -1,277 +1,394 @@
 # Speedtest Client mit Display
 
-Ein robuster Speedtest- und Monitoring-Client für Raspberry Pi und andere kleine Linux-Systeme.
+Ein Raspberry-Pi-basierter LibreSpeed-Client mit OLED-Display, Status-LED und Taster.
 
-Der Client sammelt Netzwerk-, DNS-, Hardware-, Traceroute- und LibreSpeed-Messdaten lokal als CSV-Dateien und sendet sie asynchron an eine zentrale API. Zusätzlich steuert ein Python-Display-Daemon ein SSD1306-OLED, eine Status-LED und einen Taster.
+Der Client führt automatisch Speedtests aus, sammelt weitere Messdaten und legt die Ergebnisse lokal im Spool ab, damit sie anschließend an einen Server übertragen werden können.
+
+Zusätzlich zeigt ein OLED-Display den letzten Speedtest, den Countdown bis zum nächsten Test und den Status beim Systemstart an.
+
+---
 
 ## Funktionen
 
-- kontinuierlicher Ping-Loop
-- periodische DNS-Checks
-- periodische Hardware-Metriken
-- periodische LibreSpeed-Speedtests mit Server-Fallback
-- periodische Traceroute-Messungen
-- lokaler CSV-Spool für kurzzeitige Ausfälle
-- automatischer Versand zur zentralen API
-- automatische Bereinigung alter Spool-Dateien
-- Watchdog für einfache Selbstheilung
-- OLED-Display mit letztem Speedtest und Countdown bis zum nächsten Test
-- LED leuchtet während eines laufenden Speedtests
-- Taster zum Ein- und Ausschalten des Displays
-- automatischer Darkmode des Displays nach Inaktivität
-- erster Speedtest nach Boot mit eigenem Countdown
-- Cron-basierter Betrieb, Display nur für die Hardwarelogik in Python
+- automatischer LibreSpeed-Speedtest per Bash
+- Fallback auf mehrere Speedtest-Server
+- OLED-Anzeige für:
+  - letzten Speedtest
+  - Download
+  - Upload
+  - Ping
+  - Jitter
+  - Countdown bis zum nächsten Test
+  - Startanzeige bis zum ersten Test nach dem Boot
+- Status-LED:
+  - leuchtet während eines laufenden Speedtests
+- Tastersteuerung:
+  - Display ein/aus
+  - automatischer Darkmode nach Inaktivität
+- zusätzliche Messungen:
+  - Ping
+  - DNS
+  - Hardware
+  - Traceroute
+- lokaler Spool für Pending-, Sent- und Failed-Daten
+- Versand der Messdaten über separaten Senderprozess
 
-## Display-Funktionen
+---
 
-Das OLED zeigt im Normalbetrieb:
-
-- Zeitstempel des letzten Speedtests
-- Download in Mbit/s
-- Upload in Mbit/s
-- Ping und Jitter
-- Countdown bis zum nächsten Test
-
-Zusätzlich gilt:
-
-- nach dem Boot wird zunächst der Startbildschirm für den ersten Test angezeigt
-- solange nach dem Boot noch kein neuer Speedtest gelaufen ist, wird der Countdown bis zum ersten Speedtest angezeigt
-- während eines laufenden Speedtests leuchtet die LED
-- nach 3 Minuten ohne Tastendruck wird das Display ausgeschaltet
-- beim Ausschalten erscheint kurz `Enter darkmode`
-- per Taster kann das Display jederzeit wieder eingeschaltet werden
-
-## Projektstruktur
+## Projektaufbau
 
 ```text
-/opt/speedmon/
-├── bin/                  # ausführbare Skripte
-├── etc/                  # Konfiguration
-├── lib/                  # gemeinsame Hilfsfunktionen
-├── spool/
-│   ├── pending/          # noch nicht gesendete CSV-Dateien
-│   ├── sent/             # erfolgreich gesendete CSV-Dateien
-│   └── failed/           # fehlgeschlagene/abgelegte CSV-Dateien
-├── log/                  # Logs
-├── run/                  # Lock- und State-Dateien
-└── tmp/                  # temporäre Dateien
+/opt/speedmon
+├── bin/        # ausführbare Skripte
+├── etc/        # Projektkonfiguration
+├── lib/        # gemeinsame Shell-Funktionen
+├── log/        # Logdateien zur Laufzeit
+├── run/        # Laufzeitstatus / State-Dateien
+├── tmp/        # temporäre Dateien
+├── spool/      # Messdaten-Spool
+│   ├── pending/
+│   ├── sent/
+│   └── failed/
 ```
 
-## Messarten
+### Wichtige Skripte
 
-### Ping
+- `bin/run-speedtest.sh`  
+  Führt einen Speedtest aus und schreibt das Ergebnis in den Spool.
 
-`collect-ping.sh` läuft als Dauerprozess und schreibt fortlaufend Ping-Ergebnisse in minutenweise CSV-Dateien.
+- `bin/run-speedtest-after-boot.sh`  
+  Führt den ersten Speedtest nach dem Boot aus.
 
-Typische Felder:
+- `bin/update-display-state.sh`  
+  Schreibt den aktuellen Display-Status in eine JSON-Datei.
 
+- `bin/display-daemon.py`  
+  Steuert OLED, LED und Taster.
+
+- `bin/install-deps.sh`  
+  Installiert benötigte Pakete und Python-Abhängigkeiten.
+
+- `bin/install-cron.sh`  
+  Erstellt den Cronjob für die regelmäßigen Messungen.
+
+- `bin/install-display-service.sh`  
+  Installiert und aktiviert den Display-Dienst.
+
+- `bin/install.sh`  
+  Erzeugt die Projektstruktur und richtet die Basisinstallation ein.
+
+---
+
+## Architektur
+
+Das Projekt ist bewusst getrennt aufgebaut:
+
+### Bash
+Bash übernimmt:
+- Speedtest
+- Datenerfassung
+- Spool-Verwaltung
+- Versand
+- Cronjobs
+- Installationslogik
+
+### Python
+Python wird nur für die Display-Hardware verwendet:
+- OLED-Ausgabe
+- LED
+- Taster
+- Schlaf-/Wake-Logik des Displays
+
+Die Übergabe zwischen Bash und Python erfolgt über:
+
+```text
+/opt/speedmon/run/display-state.json
+```
+
+Bash aktualisiert diese Datei, Python liest sie zyklisch ein und zeigt den aktuellen Zustand an.
+
+---
+
+## Hardware
+
+Ausgelegt für einen Raspberry Pi mit:
+
+- SSD1306 OLED per I2C
+- LED an GPIO 17
+- Taster an GPIO 27
+
+### GPIO-Belegung
+
+- `LED_PIN = 17`
+- `BUTTON_PIN = 27`
+
+### Display
+
+Verwendet wird ein SSD1306-Display mit:
+
+- I2C-Adresse: `0x3C`
+- Größe: `128x64`
+
+---
+
+## Anzeigeverhalten
+
+### Im normalen Betrieb
+Das Display zeigt:
+
+- Zeit des letzten Speedtests
 - Status
-- Latenz in Millisekunden
-- Paketverlust in Prozent
-- Public IP
-- LAN-IP(s)
-- Default Interface
-
-### DNS
-
-`collect-dns.sh` testet konfigurierte DNS-Server und Hostnamen.
-
-Typische Felder:
-
-- DNS-Server
-- Query-Name
-- Status
-- Query-Zeit in Millisekunden
-- Antwort-IP(s)
-
-### Hardware
-
-`collect-hardware.sh` sammelt Systemmetriken.
-
-Typische Felder:
-
-- Load Average
-- CPU-Auslastung
-- CPU-Temperatur
-- RAM-Nutzung
-- Root-Dateisystem
-- Uptime
-- Interface-Statistiken
-- Prozessanzahl
-- TCP-Verbindungen
-
-### Speedtest
-
-`run-speedtest.sh` führt periodisch LibreSpeed-Tests gegen definierte Server aus.
-
-Typische Felder:
-
 - Download
 - Upload
 - Ping
 - Jitter
-- gewählter Testserver
-- Raw JSON des Ergebnisses
+- Countdown bis zum nächsten Test
 
-### Traceroute
+### Nach dem Boot
+Nach dem Start zeigt das Display zunächst:
 
-`collect-traceroute.sh` führt Traceroute-Messungen zum konfigurierten Ziel durch.
+- Projekttitel
+- IP-Adresse bzw. Wartehinweis
+- Countdown bis zum ersten Speedtest nach dem Boot
 
-## Voraussetzungen
+Erst nach dem ersten neuen Speedtest werden wieder echte Messwerte angezeigt.
 
-- Raspberry Pi oder anderes Linux-System
-- Bash
-- Cron
-- jq
-- curl
-- Python 3
-- I2C aktiviert, wenn das OLED genutzt wird
-- SSD1306 OLED an I2C
-- LED und Taster gemäß eigener Verdrahtung
+### Darkmode
+Wenn der Taster längere Zeit nicht betätigt wird, schaltet das Display in den Darkmode.
 
-## Download
+Ein Tastendruck:
+- weckt das Display wieder auf
+- oder schaltet es wieder aus
 
-### Repository klonen
-
-```bash
-git clone https://github.com/FrankDiehr/speedtest_client_mit_Display.git /opt/speedmon
-cd /opt/speedmon
-```
-
-### Alternativ als ZIP herunterladen
-
-- Auf GitHub das Repository öffnen
-- `Code` anklicken
-- `Download ZIP` wählen
-- nach `/opt/speedmon` entpacken
+---
 
 ## Installation
 
-### 1. Abhängigkeiten installieren
+### 1. Projekt nach `/opt/speedmon` kopieren
+
+Das Projekt muss nach diesem Pfad liegen:
+
+```bash
+/opt/speedmon
+```
+
+### 2. Abhängigkeiten installieren
 
 ```bash
 cd /opt/speedmon
 sudo /opt/speedmon/bin/install-deps.sh
 ```
 
-Das Skript installiert unter anderem:
-
-- Git-Basiswerkzeuge und Netzwerktools
-- Python 3 und benötigte Python-Pakete
-- `librespeed-cli`
-- I2C-Hilfstools
-
-### 2. Secret-Datei anlegen
-
-Die API-Zugangsdaten liegen bewusst außerhalb des Projektverzeichnisses.
-
-```bash
-sudo mkdir -p /etc/speedmon
-sudo nano /etc/speedmon/secret.env
-```
-
-Beispiel:
-
-```bash
-API_TOKEN="dein_api_token"
-```
-
-### 3. Konfiguration anpassen
-
-Die Hauptkonfiguration liegt in:
-
-```bash
-/opt/speedmon/etc/config.sh
-```
-
-Wichtige Werte:
-
-```bash
-CLIENT_ID="${CLIENT_ID:-$(hostname -s 2>/dev/null || echo speedmon-unknown)}"
-SITE_NAME="speedlens"
-
-NETWORK_INTERFACE="eth0"
-PING_TARGET_PRIMARY="1.1.1.1"
-PING_TARGET_SECONDARY="8.8.8.8"
-
-API_BASE_URL="https://dein-server.example/api/v1"
-
-DNS_CHECK_INTERVAL_MIN="5"
-HARDWARE_INTERVAL_MIN="2"
-SPEEDTEST_INTERVAL_MIN="10"
-TRACEROUTE_INTERVAL_MIN="60"
-WATCHDOG_INTERVAL_MIN="5"
-DELIVERY_INTERVAL_SEC="120"
-
-FIRST_SPEEDTEST_DELAY_SEC="40"
-```
-
-Hinweis:
-
-- `SPEEDTEST_INTERVAL_MIN` ist der normale Dauertakt
-- `FIRST_SPEEDTEST_DELAY_SEC` steuert nur den Countdown bis zum ersten Test nach dem Boot
-- der eigentliche Reboot-Speedtest wird zusätzlich über Cron mit einem kurzen `sleep` gestartet
-
-### 4. Hostname optional setzen
-
-Da `CLIENT_ID` standardmäßig vom kurzen Hostnamen kommt, ist ein sauber gesetzter Hostname sinnvoll.
-
-```bash
-sudo hostnamectl set-hostname standort-berlin-01
-```
-
-### 5. Projekt installieren
+### 3. Grundstruktur und Dienste einrichten
 
 ```bash
 sudo /opt/speedmon/bin/install.sh
 ```
 
-Das Skript:
-
-- legt die Laufzeitstruktur unter `/opt/speedmon` an
-- setzt die nötigen Rechte
-- installiert die Cronjobs
-- installiert und aktiviert den Display-Service
-
-### 6. Reboot
+### 4. System neu starten
 
 ```bash
 sudo reboot
 ```
 
-## Cron und Boot-Verhalten
+---
 
-Die Datei `/etc/cron.d/speedmon` wird von `bin/install-cron.sh` erzeugt.
+## Voraussetzungen
 
-Wichtige Punkte:
+- Raspberry Pi OS / Debian-basiertes System
+- aktiviertes I2C
+- funktionierendes Netzwerk
+- eingerichtete LibreSpeed-Serverliste
+- vorhandene Server-API bzw. Zielsystem für den Datenversand
 
-- `collect-ping.sh` startet per `@reboot` und läuft dauerhaft
-- beim Boot werden zuerst alte CSV-Dateien in `spool/pending` gelöscht, damit keine beschädigten Altlasten gesendet werden
-- der erste Speedtest nach dem Boot startet mit kurzem Puffer per `sleep`, damit Display und restliches System sauber oben sind
-- der normale periodische Speedtest läuft zusätzlich nach `SPEEDTEST_INTERVAL_MIN`
+### I2C aktivieren
 
-## Display-Service
-
-Der Display-Daemon läuft als systemd-Service:
-
-- Service-Datei: `/etc/systemd/system/speedmon-display.service`
-- Hauptskript: `/opt/speedmon/bin/display-daemon.py`
-
-Nützliche Befehle:
+Falls I2C noch nicht aktiv ist:
 
 ```bash
-systemctl status speedmon-display.service --no-pager
-systemctl restart speedmon-display.service
-journalctl -u speedmon-display.service -n 50 --no-pager
+sudo raspi-config
 ```
+
+Dann:
+
+- `Interface Options`
+- `I2C`
+- `Enable`
+
+---
+
+## Konfiguration
+
+Die Projektkonfiguration liegt in:
+
+```bash
+/opt/speedmon/etc/config.sh
+```
+
+Dort werden unter anderem folgende Werte gesetzt:
+
+- Messintervalle
+- Versandintervalle
+- Client-ID
+- Standortname
+- Serverpfade
+- LibreSpeed-Konfiguration
+- Zeitpunkt des ersten Speedtests nach dem Boot
+
+### Wichtige Werte
+
+#### Speedtest-Intervall
+
+```bash
+SPEEDTEST_INTERVAL_MIN="10"
+```
+
+Legt fest, in welchem Abstand normale Speedtests ausgeführt werden.
+
+#### Erster Speedtest nach dem Boot
+
+```bash
+FIRST_SPEEDTEST_DELAY_SEC="30"
+```
+
+Legt fest, welcher Countdown auf dem Display bis zum ersten Test nach dem Boot angezeigt wird.
+
+#### Serverliste
+
+Die LibreSpeed-Serverliste liegt in:
+
+```bash
+/opt/speedmon/etc/librespeed-servers.json
+```
+
+Dort können mehrere Server mit IDs eingetragen werden.
+
+Die Reihenfolge ist wichtig:
+- zuerst bevorzugte interne/private Server
+- danach öffentliche Fallback-Server
+
+---
+
+## Verhalten bei mehreren Speedtest-Servern
+
+`run-speedtest.sh` arbeitet die in der Serverliste eingetragenen Server nacheinander ab.
+
+Wenn ein Server kein brauchbares Ergebnis liefert, wird automatisch der nächste verwendet.
+
+Dadurch kann ein interner Server bevorzugt werden, während ein öffentlicher Server als Fallback dient.
+
+---
+
+## Cronjobs
+
+Die regelmäßigen Jobs werden über folgende Datei eingerichtet:
+
+```bash
+/etc/cron.d/speedmon
+```
+
+Diese Datei wird durch das Skript
+
+```bash
+/opt/speedmon/bin/install-cron.sh
+```
+
+erstellt.
+
+Dort werden unter anderem ausgeführt:
+
+- Ping-Sammlung
+- DNS-Checks
+- Hardware-Messung
+- Speedtests
+- Traceroute
+- Datenversand
+- Boot-Speedtest
+
+---
+
+## Display-Dienst
+
+Der Display-Dienst wird über systemd gestartet.
+
+Installiert wird er mit:
+
+```bash
+/opt/speedmon/bin/install-display-service.sh
+```
+
+Dabei wird der Dienst:
+
+- angelegt
+- aktiviert
+- direkt gestartet
+
+Vor dem Start des Python-Daemons wird der Display-State initialisiert.
+
+---
+
+## Was `install.sh` macht
+
+`install.sh` erzeugt die benötigte Projektstruktur unter `/opt/speedmon` und richtet die Grundrechte ein.
+
+Zusätzlich ruft es die Installationsskripte für:
+
+- Cronjobs
+- Display-Dienst
+
+auf.
+
+---
+
+## Was `install-deps.sh` macht
+
+`install-deps.sh` installiert die benötigten Systempakete und Python-Abhängigkeiten, zum Beispiel:
+
+- `jq`
+- `curl`
+- `cron`
+- `python3`
+- `python3-pip`
+- `python3-gpiozero`
+- `python3-pil`
+- `i2c-tools`
+- `luma.oled`
+
+Außerdem wird dort der `librespeed-cli` installiert.
+
+---
+
+## Was man typischerweise anpasst
+
+### 1. `etc/config.sh`
+Für:
+- Intervalle
+- Client-Name
+- Standortname
+- Versandziele
+- erstes Boot-Delay
+
+### 2. `etc/librespeed-servers.json`
+Für:
+- interne Server
+- öffentliche Fallback-Server
+- Reihenfolge der Server
+
+### 3. `bin/display-daemon.py`
+Für:
+- Displaylayout
+- Texte
+- GPIO-Pins
+- Timeout für den Darkmode
+
+### 4. `bin/install-cron.sh`
+Für:
+- Cron-Zeiten
+- Boot-Speedtest-Delay vor dem ersten Start
+
+---
 
 ## Manuelle Tests
-
-### Display-State initialisieren
-
-```bash
-/opt/speedmon/bin/update-display-state.sh init
-```
 
 ### Speedtest manuell starten
 
@@ -279,31 +396,32 @@ journalctl -u speedmon-display.service -n 50 --no-pager
 /opt/speedmon/bin/run-speedtest.sh
 ```
 
-### Boot-Speedtest-Wrapper manuell testen
+### Boot-Speedtest-Skript manuell starten
 
 ```bash
 /opt/speedmon/bin/run-speedtest-after-boot.sh
 ```
 
-## Git
-
-Laufzeitdaten wie `spool/`, `tmp/`, `run/` und `log/` sind nicht für Git gedacht und sollten per `.gitignore` ausgeschlossen bleiben.
-
-Typischer Ablauf:
+### Display-Dienst prüfen
 
 ```bash
-git add .
-git commit -m "Update speedtest client with display"
-git push
+systemctl status speedmon-display.service --no-pager
 ```
 
-## Bekannte Hinweise
+### Cron-Datei prüfen
 
-- Git speichert keine leeren Ordner. Das ist hier unkritisch, weil `install.sh` die benötigten Ordner automatisch anlegt.
-- Das OLED-Layout ist auf ein SSD1306 mit 128x64 Pixeln ausgelegt.
-- Die Server-Fallback-Logik arbeitet nur dann sauber, wenn `librespeed-cli` selbst korrekt installiert ist.
-- Wenn der erste Speedtest nach dem Boot zu früh oder zu spät wirkt, kann der Reboot-`sleep` in `install-cron.sh` angepasst werden.
+```bash
+cat /etc/cron.d/speedmon
+```
 
-## Lizenz
+---
 
-Der Projektstand ist aktuell für den Eigengebrauch dokumentiert. Eine explizite Lizenzdatei ist derzeit nicht enthalten.
+## Ziel des Projekts
+
+Das Projekt soll einen eigenständig laufenden Speedtest-Client bereitstellen, der:
+
+- zuverlässig misst
+- lokal puffert
+- mit mehreren Servern umgehen kann
+- direkt am Gerät den aktuellen Status anzeigt
+- auf einem Raspberry Pi ohne zusätzliche Bedienoberfläche läuft
