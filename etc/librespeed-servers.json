@@ -1,0 +1,29 @@
+[
+  {
+    "id": 1,
+    "name": "speedlens-hetzner",
+    "server": "https://37.27.13.254/speed/backend/2",
+    "dlURL": "garbage.php",
+    "ulURL": "empty.php",
+    "pingURL": "empty.php",
+    "getIpURL": "getIP.php"
+  },
+  {
+    "id": 2,
+    "name": "speedlens-lan",
+    "server": "http://192.168.0.173:8080/",
+    "dlURL": "garbage.php",
+    "ulURL": "empty.php",
+    "pingURL": "empty.php",
+    "getIpURL": "getIP.php"
+  },
+  {
+  "id": 3,
+  "name": "public-nuremberg-librespeed",
+  "server": "http://de5.backend.librespeed.org",
+  "dlURL": "garbage.php",
+  "ulURL": "empty.php",
+  "pingURL": "empty.php",
+  "getIpURL": "getIP.php"
+  }
+]

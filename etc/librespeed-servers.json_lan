@@ -1,0 +1,20 @@
+[
+  {
+    "id": 2,
+    "name": "speedlens-lan",
+    "server": "http://192.168.5.172:8080/",
+    "dlURL": "garbage.php",
+    "ulURL": "empty.php",
+    "pingURL": "empty.php",
+    "getIpURL": "getIP.php"
+  },
+  {
+    "id": 1,
+    "name": "speedlens-hetzner",
+    "server": "https://37.27.13.254/speed/backend/",
+    "dlURL": "garbage.php",
+    "ulURL": "empty.php",
+    "pingURL": "empty.php",
+    "getIpURL": "getIP.php"
+  }
+]
