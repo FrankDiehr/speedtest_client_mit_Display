@@ -3,7 +3,9 @@
 
 set -euo pipefail
 
-BASE_DIR="/opt/speedmon/spool/pending"
+PENDING_DIR="/opt/speedmon/spool/pending"
+RUN_DIR="/opt/speedmon/run"
+TMP_DIR="/opt/speedmon/tmp"
 LOG_FILE="/opt/speedmon/log/cron.log"
 
 log() {
@@ -11,13 +13,20 @@ log() {
 }
 
 main() {
-  if [[ ! -d "$BASE_DIR" ]]; then
-    log "Pending spool directory not found: $BASE_DIR"
-    exit 0
+  if [[ -d "$PENDING_DIR" ]]; then
+    find "$PENDING_DIR" -type f -name '*.csv' -delete
+    log "Cleared pending spool CSV files on boot"
   fi
 
-  find "$BASE_DIR" -type f -name '*.csv' -delete
-  log "Cleared pending spool CSV files on boot"
+  if [[ -d "$RUN_DIR" ]]; then
+    find "$RUN_DIR" -mindepth 1 -maxdepth 1 -type f -delete
+    log "Cleared run state files on boot"
+  fi
+
+  if [[ -d "$TMP_DIR" ]]; then
+    find "$TMP_DIR" -mindepth 1 -maxdepth 1 -type f -delete
+    log "Cleared temporary files on boot"
+  fi
 }
 
 main "$@"

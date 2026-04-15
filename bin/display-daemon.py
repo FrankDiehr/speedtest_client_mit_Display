@@ -6,6 +6,7 @@ import os
 import socket
 import subprocess
 import time
+from datetime import datetime, timedelta
 from threading import Lock
 
 from gpiozero import LED, Button
@@ -20,7 +21,7 @@ BUTTON_PIN = 27
 STATE_FILE = "/opt/speedmon/run/display-state.json"
 
 INACTIVITY_TIMEOUT_SEC = 180
-SLEEP_MESSAGE_SEC = 1.0
+SLEEP_MESSAGE_SEC = 2.0
 POLL_INTERVAL_SEC = 0.5
 
 led = LED(LED_PIN)
@@ -32,6 +33,7 @@ font = ImageFont.load_default()
 
 state_lock = Lock()
 display_awake = True
+sleep_in_progress = False
 last_button_ts = time.monotonic()
 last_render_key = None
 
@@ -133,31 +135,46 @@ def fmt_timestamp(iso_ts):
         return iso_ts[:16]
 
 
-def fmt_countdown(next_epoch, running):
-    if running:
-        return "Laeuft jetzt..."
-    if not next_epoch or next_epoch <= 0:
-        return "Next: --:--"
+def get_next_cron_epoch(interval_min: int) -> int:
+    """
+    Berechnet den nächsten echten Cron-Slot für Muster wie */N * * * *
+    Beispiele:
+      interval=10 -> 00,10,20,30,40,50
+      interval=5  -> 00,05,10,...
+      interval=60 -> volle Stunde
+    """
+    now = datetime.now()
 
-    remaining = max(0, int(next_epoch - time.time()))
+    if interval_min <= 0:
+        return int(time.time())
+
+    if interval_min >= 60:
+        next_dt = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        return int(next_dt.timestamp())
+
+    next_minute = ((now.minute // interval_min) + 1) * interval_min
+
+    if next_minute >= 60:
+        next_dt = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    else:
+        next_dt = now.replace(minute=next_minute, second=0, microsecond=0)
+
+    return int(next_dt.timestamp())
+
+
+def fmt_countdown(interval_min, running):
+    if running:
+        return "Test laeuft..."
+
+    next_epoch = get_next_cron_epoch(interval_min)
+    remaining = max(0, next_epoch - int(time.time()))
+
     mm, ss = divmod(remaining, 60)
     hh, mm = divmod(mm, 60)
 
     if hh > 0:
         return f"Next {hh:02d}:{mm:02d}:{ss:02d}"
     return f"Next {mm:02d}:{ss:02d}"
-
-
-def fmt_first_countdown(next_epoch, interval_min):
-    if next_epoch and next_epoch > 0:
-        remaining = max(0, int(next_epoch - time.time()))
-    else:
-        remaining = max(0, int(interval_min * 60))
-
-    mm, ss = divmod(remaining, 60)
-    hh, mm = divmod(mm, 60)
-    total_minutes = hh * 60 + mm
-    return f"{total_minutes:02d}:{ss:02d}"
 
 
 def sync_led(state):
@@ -171,29 +188,6 @@ def should_show_first_boot_screen(state):
     return bool(state.get("awaiting_first_speedtest", True))
 
 
-def draw_boot_screen(ip_addr):
-    global last_render_key
-
-    if not display_awake:
-        return
-
-    render_key = ("boot", ip_addr, display_awake)
-    if render_key == last_render_key:
-        return
-
-    safe_show()
-    with canvas(device) as draw:
-        draw.text((18, 4), "speedlens 2.0", font=font, fill="white")
-        if ip_addr:
-            draw.text((0, 24), "Bereit / IP-Adresse:", font=font, fill="white")
-            draw.text((0, 40), ip_addr, font=font, fill="white")
-        else:
-            draw.text((0, 24), "Warte auf", font=font, fill="white")
-            draw.text((0, 40), "IP-Adresse ...", font=font, fill="white")
-
-    last_render_key = render_key
-
-
 def draw_first_run_screen(state, ip_addr):
     global last_render_key
 
@@ -201,14 +195,12 @@ def draw_first_run_screen(state, ip_addr):
         return
 
     running = state.get("speedtest_running", False)
-    interval_min = state.get("speedtest_interval_min", 10)
-    countdown = fmt_first_countdown(state.get("next_run_epoch", 0), interval_min)
 
     if running:
-        line1 = "Erster Test laeuft"
+        line1 = "Test laeuft..."
         line2 = "bitte warten..."
     else:
-        line1 = f"{countdown} bis zum"
+        line1 = "Warte auf"
         line2 = "ersten Speedtest"
 
     render_key = ("first_run", ip_addr, running, line1, line2, display_awake)
@@ -223,7 +215,7 @@ def draw_first_run_screen(state, ip_addr):
         else:
             draw.text((0, 14), "Warte auf IP-Adresse", font=font, fill="white")
 
-        draw.text((6, 34), line1, font=font, fill="white")
+        draw.text((20, 34), line1, font=font, fill="white")
         draw.text((4, 48), line2, font=font, fill="white")
 
     last_render_key = render_key
@@ -241,7 +233,7 @@ def draw_main_screen(state):
     ul = fmt_num(state.get("last_upload_mbps", 0.0), 1)
     ping = fmt_num(state.get("last_ping_ms", 0.0), 1)
     jitter = fmt_num(state.get("last_jitter_ms", 0.0), 1)
-    countdown = fmt_countdown(state.get("next_run_epoch", 0), state.get("speedtest_running", False))
+    countdown = fmt_countdown(state.get("speedtest_interval_min", 10), state.get("speedtest_running", False))
 
     render_key = (
         "main",
@@ -273,30 +265,33 @@ def draw_main_screen(state):
 def draw_sleep_message():
     safe_show()
     with canvas(device) as draw:
-        draw.text((10, 24), "Enter darkmode", font=font, fill="white")
+        draw.text((26, 24), "Display Off", font=font, fill="white")
 
 
 def go_to_sleep():
-    global display_awake, last_render_key
+    global display_awake, sleep_in_progress, last_render_key
 
     with state_lock:
-        if not display_awake:
+        if not display_awake or sleep_in_progress:
             return
-        draw_sleep_message()
+        sleep_in_progress = True
 
+    draw_sleep_message()
     time.sleep(SLEEP_MESSAGE_SEC)
 
     with state_lock:
         display_awake = False
+        sleep_in_progress = False
         last_render_key = None
         safe_hide()
 
 
 def wake_display():
-    global display_awake, last_render_key
+    global display_awake, sleep_in_progress, last_render_key
 
     with state_lock:
         display_awake = True
+        sleep_in_progress = False
         last_render_key = None
         safe_show()
 
@@ -328,8 +323,9 @@ def main():
 
         with state_lock:
             awake = display_awake
+            sleeping_now = sleep_in_progress
 
-        if awake:
+        if awake and not sleeping_now:
             ip_addr = get_lan_ip()
 
             if should_show_first_boot_screen(state):
