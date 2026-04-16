@@ -18,9 +18,6 @@ PING_HEADER='id,timestamp_utc,client_id,site_name,target,status,latency_ms,packe
 
 stop_requested=0
 
-PUBLIC_IP_CACHE_TTL_SEC="${PUBLIC_IP_CACHE_TTL_SEC:-900}"
-PUBLIC_IP_CACHE_FILE="${STATE_DIR:-$SPOOL_DIR/state}/public_ip.cache"
-
 on_exit() {
   stop_requested=1
   log "INFO" "collect-ping stopping"
@@ -55,57 +52,6 @@ normalize_float() {
   else
     printf '0\n'
   fi
-}
-
-read_public_ip_cache() {
-  local now ts ip age
-  now="$(now_epoch)"
-
-  [[ -r "$PUBLIC_IP_CACHE_FILE" ]] || return 1
-
-  IFS='|' read -r ts ip < "$PUBLIC_IP_CACHE_FILE" || return 1
-
-  [[ "${ts:-}" =~ ^[0-9]+$ ]] || return 1
-  [[ -n "${ip:-}" ]] || return 1
-
-  age=$(( now - ts ))
-  if (( age < PUBLIC_IP_CACHE_TTL_SEC )); then
-    printf '%s\n' "$ip"
-    return 0
-  fi
-
-  return 1
-}
-
-write_public_ip_cache() {
-  local ip="${1:-}"
-  local now dir
-
-  [[ -n "$ip" ]] || return 0
-
-  now="$(now_epoch)"
-  dir="$(dirname "$PUBLIC_IP_CACHE_FILE")"
-  mkdir -p "$dir"
-
-  printf '%s|%s\n' "$now" "$ip" > "$PUBLIC_IP_CACHE_FILE"
-}
-
-get_public_ip_cached() {
-  local ip=""
-
-  if ip="$(read_public_ip_cache)"; then
-    printf '%s\n' "$ip"
-    return 0
-  fi
-
-  ip="$(get_public_ip 2>/dev/null || true)"
-  if [[ -n "$ip" ]]; then
-    write_public_ip_cache "$ip"
-    printf '%s\n' "$ip"
-    return 0
-  fi
-
-  printf '\n'
 }
 
 write_ping_row() {
@@ -168,7 +114,7 @@ main_loop() {
       packet_loss="100"
     fi
 
-    public_ip="$(get_public_ip_cached || true)"
+    public_ip="$(get_public_ip || true)"
     lan_ips="$(get_lan_ips || true)"
     default_iface="$(get_default_iface || true)"
 
