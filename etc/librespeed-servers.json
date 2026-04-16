@@ -2,7 +2,7 @@
   {
     "id": 1,
     "name": "speedlens-hetzner",
-    "server": "https://37.27.13.254/speed/backend/2",
+    "server": "https://37.27.13.254/speed/backend/",
     "dlURL": "garbage.php",
     "ulURL": "empty.php",
     "pingURL": "empty.php",

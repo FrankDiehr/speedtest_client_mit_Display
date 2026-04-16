@@ -41,7 +41,7 @@ LIBRESPEED_CLI_BIN="/usr/local/bin/librespeed-cli"
 LIBRESPEED_TIMEOUT_SEC="120"
 LIBRESPEED_SERVER_JSON="$ETC_DIR/librespeed-servers.json"
 # optional flags, e.g. --no-upload / --secure
-LIBRESPEED_EXTRA_ARGS="--duration 15 --concurrent 4"
+LIBRESPEED_EXTRA_ARGS="--concurrent 4"
 
 # Delivery API
 API_BASE_URL="https://37.27.13.254/api/v1"

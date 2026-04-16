@@ -16,7 +16,7 @@ if ! acquire_lock "collect-hardware"; then
   exit 0
 fi
 
-HARDWARE_HEADER='id,timestamp_utc,client_id,site_name,hostname,loadavg_1,loadavg_5,loadavg_15,cpu_usage_pct,cpu_temp_c,mem_total_mb,mem_used_mb,mem_free_mb,mem_available_mb,disk_root_total_mb,disk_root_used_mb,disk_root_free_mb,disk_root_used_pct,uptime_seconds,lan_ips,dhcp_ips,public_ip,default_iface,default_gateway,iface_operstate,iface_carrier,rx_bytes,tx_bytes,rx_packets,tx_packets,rx_errors,tx_errors,rx_dropped,tx_dropped,process_count,tcp_connections'
+HARDWARE_HEADER='id,timestamp_utc,client_id,site_name,hostname,loadavg_1,loadavg_5,loadavg_15,cpu_usage_pct,cpu_temp_c,mem_total_mb,mem_used_mb,mem_free_mb,mem_available_mb,disk_root_total_mb,disk_root_used_mb,disk_root_free_mb,disk_root_used_pct,uptime_seconds,lan_ips,dhcp_ips,public_ip,default_iface,default_gateway,iface_operstate,iface_carrier,rx_bytes,tx_bytes,rx_packets,tx_packets,rx_errors,tx_errors,rx_dropped,tx_dropped,process_count,tcp_connections,operating_system'
 
 read_loadavg() {
   awk '{print $1 "," $2 "," $3}' /proc/loadavg
@@ -110,6 +110,13 @@ read_tcp_connections() {
   "$CMD_SS" -tan 2>/dev/null | awk 'NR>1 {count++} END {print count+0}'
 }
 
+read_operating_system() {
+  local os=""
+  os="$(awk -F= '$1=="PRETTY_NAME"{val=$2; gsub(/^"/,"",val); gsub(/"$/,"",val); print val}' /etc/os-release 2>/dev/null)"
+  [[ -n "$os" ]] || os="unknown"
+  printf '%s' "$os"
+}
+
 main() {
   local id timestamp_utc hostname
   local loadavg_1 loadavg_5 loadavg_15
@@ -119,7 +126,7 @@ main() {
   local uptime_seconds lan_ips dhcp_ips public_ip default_iface default_gateway
   local iface_operstate iface_carrier
   local rx_bytes tx_bytes rx_packets tx_packets rx_errors tx_errors rx_dropped tx_dropped
-  local process_count tcp_connections
+  local process_count tcp_connections operating_system
   local row file
 
   id="$(make_id)"
@@ -154,6 +161,7 @@ main() {
 
   process_count="$(read_process_count || true)"
   tcp_connections="$(read_tcp_connections || true)"
+  operating_system="$(read_operating_system || true)"
 
   # Numerische Felder zentral hart normalisieren
   loadavg_1="$(normalize_float "$loadavg_1")"
@@ -188,7 +196,7 @@ main() {
   tcp_connections="$(normalize_int "$tcp_connections")"
 
   row="$(
-    printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+    printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
       "$(csv_escape "$id")" \
       "$(csv_escape "$timestamp_utc")" \
       "$(csv_escape "$CLIENT_ID")" \
@@ -224,7 +232,8 @@ main() {
       "$(csv_escape "$rx_dropped")" \
       "$(csv_escape "$tx_dropped")" \
       "$(csv_escape "$process_count")" \
-      "$(csv_escape "$tcp_connections")"
+      "$(csv_escape "$tcp_connections")" \
+      "$(csv_escape "$operating_system")"
   )"
 
   file="$(write_kv_csv_file "hardware" "$HARDWARE_HEADER" "$row")"
